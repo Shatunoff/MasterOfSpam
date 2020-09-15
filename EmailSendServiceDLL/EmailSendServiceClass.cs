@@ -1,13 +1,13 @@
 ﻿using System;
-using System.Net;
-using System.Net.Mail;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Windows;
 using System.Threading.Tasks;
+using System.Net;
+using System.Net.Mail;
+using System.Windows.Forms;
 
-namespace MasterOfSpam
+namespace EmailSendServiceDLL
 {
     public class EmailSendServiceClass
     {
@@ -42,19 +42,11 @@ namespace MasterOfSpam
                     {
                         client.Send(message);
                     }
-                    catch(Exception ex)
+                    catch (Exception ex)
                     {
                         MessageBox.Show(ex.ToString(), "Невозможно отправить письмо");
                     }
                 }
-            }
-        }
-
-        public void SendMails(IQueryable<Emails> emails)
-        {
-            foreach (Emails email in emails)
-            {
-                SendMail(email.EMAIL, email.NAME);
             }
         }
     }

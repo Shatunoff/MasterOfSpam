@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="utf-8"?><Database Name="MailsAndSenders" Class="EmailsDataContext" xmlns="http://schemas.microsoft.com/linqtosql/dbml/2007">
+  <Connection Mode="AppSettings" ConnectionString="Data Source=OPI8\SQLExpress;Initial Catalog=MailsAndSenders;Persist Security Info=True;User ID=sa" SettingsObjectName="MasterOfSpam.Properties.Settings" SettingsPropertyName="MailsAndSendersConnectionString" Provider="System.Data.SqlClient" />
+  <Table Name="dbo.Emails" Member="Emails">
+    <Type Name="Emails">
+      <Column Name="ID" Type="System.Int32" DbType="Int NOT NULL" IsPrimaryKey="true" CanBeNull="false" />
+      <Column Name="EMAIL" Type="System.String" DbType="NVarChar(MAX) NOT NULL" CanBeNull="false" />
+      <Column Name="NAME" Type="System.String" DbType="NVarChar(MAX) NOT NULL" CanBeNull="false" />
+    </Type>
+  </Table>
+</Database>
