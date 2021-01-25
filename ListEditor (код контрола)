@@ -1,0 +1,488 @@
+#region Using
+
+using Core;
+using Gizmox.WebGUI.Common.Resources;
+using Gizmox.WebGUI.Forms;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+
+#endregion
+
+namespace Web.Controls
+{
+    public partial class ListEditor<TEntity, TPE> : UserControl, IListEditor
+        where TEntity : Entity, new()
+        where TPE : PresentationEntity<TEntity>, new()
+    {
+        public ListEditor()
+        {
+            InitializeComponent();
+            this.listView.RowTemplate.DefaultCellStyle.Font = new System.Drawing.Font("Tahoma", 10F);
+
+            tbbCreate.Image = new IconResourceHandle("new.png");
+            tbbEdit.Image = new IconResourceHandle("edit.png");
+            tbbDelete.Image = new IconResourceHandle("delete.png");
+            tbbPreview.Image = new IconResourceHandle("preview.png");
+
+            tbbUp.Image = new IconResourceHandle("up.png");
+            tbbDown.Image = new IconResourceHandle("down.png");
+        }
+
+        public ListEditor(float fontsize)
+        {
+            InitializeComponent();
+            this.listView.RowTemplate.DefaultCellStyle.Font = new System.Drawing.Font("Tahoma", fontsize);
+
+            tbbCreate.Image = new IconResourceHandle("new.png");
+            tbbEdit.Image = new IconResourceHandle("edit.png");
+            tbbDelete.Image = new IconResourceHandle("delete.png");
+            tbbPreview.Image = new IconResourceHandle("preview.png");
+
+            tbbUp.Image = new IconResourceHandle("up.png");
+            tbbDown.Image = new IconResourceHandle("down.png");
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool CanSort
+        {
+            get { return listView.EnableSort; }
+            set { listView.EnableSort = value; }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public IUnitOfWork UnitOfWork { get; set; }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public virtual bool IndependentTransaction
+        {
+            get;
+            set;
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool CanMove
+        {
+            get { return tbbUp.Visible; }
+            set { tbbUp.Visible = value; tbbDown.Visible = value; listView.EnableSort = !value; }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool Editable
+        {
+            get
+            {
+                if (ToolBar.Visible)
+                {
+                    if ((tbbCreate != null && tbbCreate.Visible)
+                        || (tbbEdit != null && tbbEdit.Visible)
+                        || (tbbDelete != null && tbbDelete.Visible))
+                    {
+                        return true;
+                    }
+                    else return false;
+                }
+                else return false;
+            }
+            set
+            {
+                foreach (ToolBarButton b in ToolBar.Buttons)
+                {
+                    if ((b != tbbUp && b != tbbDown) || !value)
+                        b.Visible = value;
+                }
+                ToolBar.Visible = value;
+
+                if (value) UpdateButtons();
+                else CanMove = false;
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public Action<TEntity> ParentSetter { get; set; }
+
+        public void SetColumnName(int vColumnNum, string vText)
+        {
+            listView.Columns[vColumnNum].HeaderText = vText;
+        }
+
+        private Entity parentItem;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public Entity ParentItem
+        {
+            get { return parentItem; }
+            set { parentItem = value; NotifyPropertyChanged("ParentItem"); }
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        private void NotifyPropertyChanged(string info)
+        {
+            if (PropertyChanged != null)
+            {
+                PropertyChanged(this, new PropertyChangedEventArgs(info));
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool IsManyToMany { get; set; }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public TEntity Selected
+        {
+            get
+            {
+                return listView.GetSelected<TEntity, TPE>();
+            }
+            set
+            {
+                listView.SetSelected<TEntity, TPE>(value);
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public TEntity LastSelected { get; set; }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public TPE SelectedPE
+        {
+            get
+            {
+                return listView.GetSelectedPE<TEntity, TPE>();
+            }
+            set
+            {
+                listView.SetSelectedPE<TEntity, TPE>(value);
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public Func<TEntity, bool> Filter { get; set; }
+        public Func<TEntity, object> OrderBy { get; set; }
+
+        public event EventHandler ItemCreated = delegate { };
+        public event EventHandler ItemUpdated = delegate { };
+        public event EventHandler ItemDeleted = delegate { };
+        public event EventHandler ItemChanged = delegate { };
+        public event EventHandler DetailedClosed = delegate { };
+        public event EventHandler AdditionalRefresh = delegate { };
+        public event EventHandler RefreshColorRows = delegate { };        
+
+        protected virtual bool CanCreate() { return AccessController.CanCreate(typeof(TEntity)); }
+
+        protected virtual bool CanEdit() { return AccessController.CanUpdate(typeof(TEntity)); }
+
+        protected virtual bool CanDelete() { return AccessController.CanDelete(typeof(TEntity)); }
+
+        protected virtual bool CanRead() { return AccessController.CanRead(typeof(TEntity)); }
+
+        protected virtual bool BeforeDelete()
+        {
+            return true;
+        }
+
+        private void deleteFrom_Closed(object sender, EventArgs e)
+        {
+            Form from = (Form)sender;
+            if (from.DialogResult == DialogResult.Yes)
+            {
+                if (IsManyToMany)
+                {
+                    UnitOfWork.RegisterDirty(ParentItem);
+                }
+
+                LastSelected = Selected;
+               
+                UnitOfWork.RegisterDeleted(Selected);                
+                Items.Remove(Selected);
+                UnitOfWork.RegisterDirtyRef(ParentItem);
+                RefreshList();
+                UpdateIndexes();
+                ItemDeleted(this, new EventArgs() {});
+
+                if (IndependentTransaction)
+                    UnitOfWork.Commit();
+
+                AdditionalRefresh(this, null);
+            }
+        }
+
+        protected virtual IDetailForm<TEntity> CreateDetailForm(ref TEntity item) { return null; }
+
+        private IDetailForm<TEntity> detailForm;
+
+        public IDetailForm<TEntity> OpenDetail(TEntity item, bool readOnly)
+        {
+            var form = CreateDetailForm(ref item);
+            if (form != null)
+            {
+                detailForm = form as IDetailForm<TEntity>;
+                detailForm.ReadOnly = readOnly || (item != null && !CanEdit());
+
+                if (item == null)
+                {
+                    item = new TEntity();
+                    detailForm.Item = item;
+
+                    ParentSetter?.Invoke(detailForm.Item);
+
+                    detailForm.ItemCreated = true;
+                }
+
+                detailForm.Item = item;
+                detailForm.UnitOfWork = UnitOfWork;                
+
+                (form as Form).ShowDialog();
+                (form as Form).FormClosed += new Form.FormClosedEventHandler(DetailForm_FormClosed);
+            }
+            return form;
+        }
+
+        void DetailForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            try
+            {
+                var form = sender as Form;
+                if (form.DialogResult != DialogResult.OK)
+                    return;
+
+                detailForm = sender as IDetailForm<TEntity>;
+
+                if (detailForm.State == DetailFormState.Create && !Items.Contains(detailForm.Item))
+                {
+                    Items.Add(detailForm.Item);
+                    if (IsManyToMany)
+                    {
+                        UnitOfWork.RegisterDirty(ParentItem);
+                    }
+                    DetailForm<TEntity> frm = detailForm as DetailForm<TEntity>;
+                    if (frm != null && !frm.IndependentTransaction || frm == null)
+                    {
+                        UnitOfWork.RegisterNew(detailForm.Item);
+                        UnitOfWork.RegisterDirtyRef(ParentItem);
+                    }
+                    //RefreshList();
+                    UpdateIndexes();
+                    ItemCreated(this, null);
+                }
+                else
+                {
+                    UnitOfWork.RegisterDirty(detailForm.Item);
+                    ItemUpdated(this, null);
+                }
+
+                if (IndependentTransaction)
+                    UnitOfWork.Commit();
+
+                RefreshList();
+                Selected = detailForm.Item;
+                AdditionalRefresh(this, null);
+            }
+            finally
+            {
+                DetailedClosed(this, null);
+            }
+        }
+
+        private IList<TEntity> items;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public IList<TEntity> Items
+        {
+            get { return items; }
+            set { items = value; RefreshList(); }
+        }
+
+        private void ListEditor_Load(object sender, EventArgs e)
+        {
+            //if (!DesignMode)
+            //{
+            //    RefreshList();
+            //}
+        }
+
+        public void RefreshList()
+        {
+            var list = Items;
+
+            if (list != null && Filter != null)
+            {
+                list = list.Where<TEntity>(Filter).ToList();
+            }
+
+            if (OrderBy != null)
+            {
+                list = list.OrderBy(OrderBy).ToList();
+            }
+
+            listView.Columns.Clear();
+            var listPE = Translator.Translate<TEntity, TPE>(list);
+            listView.DataSource = listPE;
+
+            Additional(listPE);
+
+            listView.Update();
+            
+            listView.AutoSizeColumnsWidth();
+            listView.AutoSizeRowsHeight();
+            RefreshColorRows(this, new EventArgs() { });
+            UpdateButtons();
+        }
+
+        public void RefreshSize()
+        {
+            listView.AutoSizeColumnsWidth();
+            listView.AutoSizeRowsHeight();
+        }
+
+        protected virtual void Additional(List<TPE> listPE)
+        {
+        }
+
+        protected virtual void RefreshAdditional()
+        {
+        }
+
+        protected virtual void AdditionalUpdateButtons()
+        {
+        }
+
+        protected void UpdateButtons()
+        {
+            try
+            {
+                tbbCreate.Enabled = CanCreate();
+                tbbPreview.Enabled = Selected != null && CanRead();
+                tbbEdit.Enabled = Selected != null && CanEdit();
+                tbbDelete.Enabled = Selected != null && CanDelete();
+            }
+            catch
+            {
+                tbbCreate.Enabled = false;
+                tbbPreview.Enabled = false;
+                tbbEdit.Enabled = false;
+                tbbDelete.Enabled = false;
+            }
+
+            var list = (IList)listView.DataSource;
+            if (list == null) return;
+
+            int index = list.IndexOf(SelectedPE);
+            tbbUp.Enabled = index > 0;
+            tbbDown.Enabled = index < list.Count - 1;
+
+            AdditionalUpdateButtons();
+        }
+
+        private void listView_DoubleClick(object sender, EventArgs e)
+        {
+            if (Selected != null && CanRead())
+            {
+                OnDoubleClick();
+            }
+        }
+
+        protected virtual void OnDoubleClick()
+        {
+            OpenDetail(Selected, !Editable);
+        }
+
+        private void tbbCreate_Click(object sender, EventArgs e)
+        {
+            OpenDetail(null, false);
+        }
+
+        private void tbbEdit_Click(object sender, EventArgs e)
+        {
+            OpenDetail(Selected, false);
+        }
+
+        private void tbbDelete_Click(object sender, EventArgs e)
+        {
+            if (BeforeDelete())
+                MessageBox.Show("Вы действительно хотите удалить запись?", "Подтверждение", MessageBoxButtons.YesNo, deleteFrom_Closed);
+        }
+
+        public void SuccessDelete(object sender, EventArgs e)
+        {
+            deleteFrom_Closed(sender, e);
+        }        
+
+        public ToolBarButton AddButton(string text, string icon, EventHandler onClick)
+        {
+            var button = new ToolBarButton()
+            {
+                Text = text,
+                Image = new IconResourceHandle(icon)
+            };
+            button.Click += onClick;
+
+            ToolBar.Buttons.Add(button);
+            
+            return button;
+        }
+
+        public DataGridViewColumn GetColumn(string columnName)
+        {
+            return listView?.GetColumn(columnName);
+        }
+
+        private void MoveCurrentItem(int add)
+        {
+            IList list = (IList)listView.DataSource;
+
+            var item = SelectedPE;
+            int i = list.IndexOf(item);
+            list.Remove(item);
+            list.Insert(i + add, item);
+            listView.Update();
+            SelectedPE = item;
+
+            Items.Remove(item.Entity);
+            Items.Insert(i + add, item.Entity);
+
+            UpdateIndexes();
+
+            RefreshAdditional();
+        }
+
+        protected void UpdateIndexes()
+        {
+            if (!CanMove) return;
+
+            IList list = (IList)listView.DataSource;
+            int i = 1;
+            foreach (var item in list)
+            {
+                var pe = item as TPE;
+                pe.Entity.Index = i;
+                UnitOfWork.RegisterDirty(pe.Entity);
+                i++;
+            }
+        }
+
+        private void listView_CurrentCellChanged(object sender, EventArgs e)
+        {
+            UpdateButtons();
+            ItemChanged(this, null);
+        }
+
+        private void tbbPreview_Click(object sender, EventArgs e)
+        {
+            OpenDetail(Selected, true);
+        }
+
+        private void tbbUp_Click(object sender, EventArgs e)
+        {
+            MoveCurrentItem(-1);
+        }
+
+        private void tbbDown_Click(object sender, EventArgs e)
+        {
+            MoveCurrentItem(+1);
+        }
+    }
+}
